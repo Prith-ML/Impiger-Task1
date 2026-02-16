@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OAuth Callback</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="spinner"></div>
+            <h2>Processing login...</h2>
+            <p>Please wait while we complete your authentication.</p>
+        </div>
+    </div>
+
+    <script>
+        // This page handles the OAuth callback
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        const error = urlParams.get('error');
+        const errorDescription = urlParams.get('error_description');
+
+        if (error) {
+            console.error('OAuth error:', error, errorDescription);
+            localStorage.setItem('auth_error', errorDescription || error);
+            window.location.href = '/';
+        } else if (code) {
+            // Exchange code for tokens
+            fetch('http://localhost:3000/api/auth/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    code: code,
+                    redirectUri: window.location.origin + '/callback'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Store tokens
+                localStorage.setItem('access_token', data.accessToken);
+                localStorage.setItem('refresh_token', data.refreshToken);
+                localStorage.setItem('id_token', data.idToken);
+                
+                // Redirect to main page
+                window.location.href = '/';
+            })
+            .catch(error => {
+                console.error('Token exchange error:', error);
+                localStorage.setItem('auth_error', error.message);
+                window.location.href = '/';
+            });
+        } else {
+            // No code or error, redirect to home
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>

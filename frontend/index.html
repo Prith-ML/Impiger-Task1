@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OAuth 2.0 Login App</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Login Section -->
+        <div id="login-section" class="section">
+            <div class="card">
+                <h1>🔐 OAuth 2.0 Authentication</h1>
+                <p class="subtitle">Secure Login with Keycloak</p>
+                
+                <div class="info-box">
+                    <h3>What This App Demonstrates:</h3>
+                    <ul>
+                        <li>✅ OAuth 2.0 Authorization Code Flow</li>
+                        <li>✅ JWT Token Management</li>
+                        <li>✅ Keycloak Integration</li>
+                        <li>✅ Email Notifications via MailHog</li>
+                    </ul>
+                </div>
+
+                <button id="login-btn" class="btn btn-primary">
+                    <span>🚀 Login with Keycloak</span>
+                </button>
+
+                <button id="register-btn" class="btn btn-secondary">
+                    <span>📝 Register New Account</span>
+                </button>
+
+                <div class="tech-stack">
+                    <small>Powered by: Keycloak • OAuth 2.0 • JWT • MailHog</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Section -->
+        <div id="dashboard-section" class="section hidden">
+            <div class="card">
+                <h1>👋 Welcome!</h1>
+                
+                <div id="user-info" class="user-info">
+                    <div class="avatar">
+                        <span id="user-initial">U</span>
+                    </div>
+                    <div class="user-details">
+                        <h2 id="user-name">Loading...</h2>
+                        <p id="user-email" class="email"></p>
+                        <p id="user-username" class="username"></p>
+                    </div>
+                </div>
+
+                <div class="token-info">
+                    <h3>🔑 Authentication Details</h3>
+                    <div class="token-item">
+                        <strong>Token Type:</strong> JWT (JSON Web Token)
+                    </div>
+                    <div class="token-item">
+                        <strong>Protocol:</strong> OAuth 2.0
+                    </div>
+                    <div class="token-item">
+                        <strong>Status:</strong> <span class="status-badge">✓ Authenticated</span>
+                    </div>
+                </div>
+
+                <div class="email-notice">
+                    <p>📧 Check <a href="http://localhost:8025" target="_blank">MailHog</a> for welcome email!</p>
+                </div>
+
+                <button id="logout-btn" class="btn btn-danger">
+                    <span>👋 Logout</span>
+                </button>
+
+                <div class="info-text">
+                    <small>When you logout, emails will be removed from MailHog</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Section -->
+        <div id="loading-section" class="section hidden">
+            <div class="card">
+                <div class="spinner"></div>
+                <p>Processing authentication...</p>
+            </div>
+        </div>
+
+        <!-- Error Section -->
+        <div id="error-section" class="section hidden">
+            <div class="card">
+                <h2>❌ Authentication Error</h2>
+                <p id="error-message" class="error-text"></p>
+                <button id="retry-btn" class="btn btn-primary">Try Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
