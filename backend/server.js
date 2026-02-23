@@ -4,11 +4,20 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const jwksClient = require('jwks-rsa');
 const session = require('express-session');
-const nodemailer = require('nodemailer');
+const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.BACKEND_PORT || 3000;
+
+// PostgreSQL pool for appdb
+const pool = new Pool({
+  host: process.env.DB_HOST || 'localhost',
+  port: process.env.DB_PORT || 5432,
+  database: process.env.DB_NAME || 'appdb',
+  user: process.env.DB_USER || 'keycloak',
+  password: process.env.DB_PASSWORD || 'password'
+});
 
 // Keycloak Configuration
 // Internal URL: used by backend container to talk to Keycloak inside Docker
@@ -24,19 +33,9 @@ const client = jwksClient({
   jwksUri: `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs`
 });
 
-// MailHog Configuration
-const mailTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'mailhog',
-  port: process.env.SMTP_PORT || 1025,
-  secure: false,
-  tls: {
-    rejectUnauthorized: false
-  }
-});
-
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:8000', 'http://127.0.0.1:8000'],
+  origin: ['http://localhost:8000', 'http://127.0.0.1:8000', 'http://localhost:5173', 'http://127.0.0.1:5173'],
   credentials: true
 }));
 app.use(express.json());
@@ -90,25 +89,6 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
-
-// Send welcome email
-async function sendWelcomeEmail(email, name) {
-  try {
-    await mailTransporter.sendMail({
-      from: '"My App" <noreply@myapp.com>',
-      to: email,
-      subject: 'Welcome to My App!',
-      html: `
-        <h1>Welcome, ${name}!</h1>
-        <p>You have successfully registered and logged in to My App.</p>
-        <p>This email was sent to verify the email functionality.</p>
-      `
-    });
-    console.log(`Welcome email sent to ${email}`);
-  } catch (error) {
-    console.error('Error sending email:', error);
-  }
-}
 
 // Delete all emails from MailHog on logout
 async function deleteMailHogEmails() {
@@ -173,14 +153,8 @@ app.post('/api/auth/token', async (req, res) => {
 
     console.log('Token exchange successful!');
 
-    // Decode the token to get user info
     const decoded = jwt.decode(access_token);
     console.log('Decoded token user:', decoded?.name, decoded?.email);
-    
-    // Send welcome email
-    if (decoded && decoded.email) {
-      await sendWelcomeEmail(decoded.email, decoded.name || decoded.preferred_username);
-    }
 
     res.json({
       accessToken: access_token,
@@ -194,6 +168,118 @@ app.post('/api/auth/token', async (req, res) => {
       error: 'Failed to exchange authorization code', 
       details: error.response?.data || error.message 
     });
+  }
+});
+
+// Initialize contacts table (address book)
+async function initDb() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255),
+        phone VARCHAR(50),
+        address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    // Add user_id to existing table if missing
+    await pool.query(`
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS user_id VARCHAR(255)
+    `).catch(() => {});
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_contacts_user_name ON contacts (user_id, name)
+    `);
+    console.log('Contacts table ready');
+  } catch (err) {
+    console.error('DB init error:', err.message);
+  }
+}
+
+// Address Book API - all endpoints require JWT
+
+// GET /api/contacts - list contacts for logged-in user only
+app.get('/api/contacts', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.sub;
+    const { rows } = await pool.query(
+      'SELECT id, name, email, phone, address, created_at, updated_at FROM contacts WHERE user_id = $1 ORDER BY name ASC',
+      [userId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Contacts fetch error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch contacts' });
+  }
+});
+
+// GET /api/contacts/:id - get single contact (own contacts only)
+app.get('/api/contacts/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.sub;
+    const { rows } = await pool.query(
+      'SELECT id, name, email, phone, address, created_at, updated_at FROM contacts WHERE id = $1 AND user_id = $2',
+      [id, userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Contact not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Contact fetch error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch contact' });
+  }
+});
+
+// POST /api/contacts - create contact (tied to logged-in user)
+app.post('/api/contacts', verifyToken, async (req, res) => {
+  try {
+    const { name, email, phone, address } = req.body;
+    const userId = req.user.sub;
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    const { rows } = await pool.query(
+      'INSERT INTO contacts (user_id, name, email, phone, address) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, phone, address, created_at, updated_at',
+      [userId, name, email || null, phone || null, address || null]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error('Contact create error:', err.message);
+    res.status(500).json({ error: 'Failed to create contact' });
+  }
+});
+
+// PUT /api/contacts/:id - update contact (own contacts only)
+app.put('/api/contacts/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, phone, address } = req.body;
+    const userId = req.user.sub;
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    const { rows } = await pool.query(
+      'UPDATE contacts SET name = $1, email = $2, phone = $3, address = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5 AND user_id = $6 RETURNING id, name, email, phone, address, created_at, updated_at',
+      [name, email || null, phone || null, address || null, id, userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Contact not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Contact update error:', err.message);
+    res.status(500).json({ error: 'Failed to update contact' });
+  }
+});
+
+// DELETE /api/contacts/:id - delete contact (own contacts only)
+app.delete('/api/contacts/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.sub;
+    const { rowCount } = await pool.query('DELETE FROM contacts WHERE id = $1 AND user_id = $2', [id, userId]);
+    if (rowCount === 0) return res.status(404).json({ error: 'Contact not found' });
+    res.json({ message: 'Contact deleted' });
+  } catch (err) {
+    console.error('Contact delete error:', err.message);
+    res.status(500).json({ error: 'Failed to delete contact' });
   }
 });
 
@@ -290,7 +376,8 @@ app.post('/api/auth/refresh', async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  await initDb();
   console.log(`Backend server running on port ${PORT}`);
   console.log(`Keycloak Internal URL: ${KEYCLOAK_URL}`);
   console.log(`Keycloak Public URL: ${KEYCLOAK_PUBLIC_URL}`);

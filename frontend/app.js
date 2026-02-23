@@ -108,14 +108,13 @@ async function initiateRegister() {
     const state = generateRandomString(32);
     localStorage.setItem('oauth_state', state);
 
-    // Use Keycloak's registration endpoint
-    const registerUrl = new URL(authConfig.authUrl);
+    // Use Keycloak's dedicated registrations endpoint
+    const registerUrl = new URL(authConfig.registerUrl);
     registerUrl.searchParams.append('client_id', authConfig.clientId);
     registerUrl.searchParams.append('redirect_uri', REDIRECT_URI);
     registerUrl.searchParams.append('response_type', 'code');
     registerUrl.searchParams.append('scope', 'openid profile email');
     registerUrl.searchParams.append('state', state);
-    registerUrl.searchParams.append('kc_action', 'register');
 
     window.location.href = registerUrl.toString();
 }
@@ -181,7 +180,7 @@ async function logout() {
     const refreshToken = localStorage.getItem('refresh_token');
 
     try {
-        // Call backend logout endpoint
+        // Call backend logout endpoint (clears MailHog, revokes refresh token)
         await fetch(`${BACKEND_URL}/api/auth/logout`, {
             method: 'POST',
             headers: {
@@ -190,14 +189,18 @@ async function logout() {
             },
             body: JSON.stringify({ refreshToken })
         });
-
-        console.log('Logout successful');
     } catch (error) {
         console.error('Logout error:', error);
     } finally {
-        // Clear local storage regardless
         clearTokens();
-        showSection('login');
+        // Redirect to Keycloak logout to end Keycloak session (otherwise SSO auto-logs back in)
+        if (!authConfig) await loadAuthConfig();
+        if (authConfig?.logoutUrl) {
+            const postLogoutRedirect = encodeURIComponent(window.location.origin);
+            window.location.href = `${authConfig.logoutUrl}?post_logout_redirect_uri=${postLogoutRedirect}&client_id=${authConfig.clientId}`;
+        } else {
+            showSection('login');
+        }
     }
 }
 
